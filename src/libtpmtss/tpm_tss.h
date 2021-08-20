@@ -198,16 +198,4 @@ struct tpm_tss_t {
  */
 tpm_tss_t *tpm_tss_probe(tpm_version_t version);
 
-/**
- * libtpmtss initialization function
- *
- * @return					TRUE if initialization was successful
- */
-bool libtpmtss_init(void);
-
-/**
- * libtpmtss de-initialization function
- */
-void libtpmtss_deinit(void);
-
 #endif /** TPM_TSS_H_ @}*/

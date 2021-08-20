@@ -102,6 +102,11 @@ struct private_tpm_tss_tss2_t {
 };
 
 /**
+ * Reference count for TCTI library handle initialization
+ */
+static refcount_t tcti_init_ref = 0;
+
+/**
  * Global TCTI dynamic library handle and init function
  */
 static void *tcti_handle;
@@ -1394,6 +1399,21 @@ METHOD(tpm_tss_t, get_event_digest, bool,
 	return TRUE;
 }
 
+/**
+ * Deinitialize TCTI library/interface
+ */
+static void deinit_tcti_library()
+{
+	if (!ref_put(&tcti_init_ref))
+	{	/* still more users */
+		return;
+	}
+	dlclose(tcti_handle);
+	tcti_handle = NULL;
+	tcti_init   = NULL;
+	tcti_opts   = NULL;
+}
+
 METHOD(tpm_tss_t, destroy, void,
 	private_tpm_tss_tss2_t *this)
 {
@@ -1401,55 +1421,13 @@ METHOD(tpm_tss_t, destroy, void,
 	this->mutex->destroy(this->mutex);
 	free(this->version_info.ptr);
 	free(this);
+	deinit_tcti_library();
 }
 
 /**
- * See header
+ * Initialize TCTI library/interface
  */
-tpm_tss_t *tpm_tss_tss2_create()
-{
-	private_tpm_tss_tss2_t *this;
-	bool available;
-
-	INIT(this,
-		.public = {
-			.get_version = _get_version,
-			.get_version_info = _get_version_info,
-			.generate_aik = _generate_aik,
-			.get_public = _get_public,
-			.supported_signature_schemes = _supported_signature_schemes,
-			.has_pcr_bank = _has_pcr_bank,
-			.read_pcr = _read_pcr,
-			.extend_pcr = _extend_pcr,
-			.quote = _quote,
-			.sign = _sign,
-			.get_random = _get_random,
-			.get_data = _get_data,
-			.get_event_digest = _get_event_digest,
-			.destroy = _destroy,
-		},
-		.mutex = mutex_create(MUTEX_TYPE_DEFAULT),
-	);
-
-	available = initialize_tcti_context(this);
-	if (available)
-	{
-		available = initialize_sys_context(this);
-	}
-	DBG1(DBG_PTS, "TPM 2.0 via TSS2 v2 %savailable", available ? "" : "not ");
-
-	if (!available)
-	{
-		destroy(this);
-		return NULL;
-	}
-	return &this->public;
-}
-
-/**
- * See header
- */
-bool tpm_tss_tss2_init(void)
+static bool init_tcti_library()
 {
 	TSS2_TCTI_INFO_FUNC infofn;
 	const TSS2_TCTI_INFO *info;
@@ -1461,6 +1439,12 @@ bool tpm_tss_tss2_init(void)
 	bool match = FALSE;
 	struct stat st;
 	int i = 0;
+
+	if (tcti_init)
+	{
+		ref_get(&tcti_init_ref);
+		return TRUE;
+	}
 
 	/* check for the existence of an in-kernel TPM resource manager */
 	if (stat(tcti_options[i], &st))
@@ -1506,13 +1490,13 @@ bool tpm_tss_tss2_init(void)
 	{
         DBG1(DBG_PTS, "%s symbol \"%s\" not found in \"%s\"", LABEL,
 					   TSS2_TCTI_INFO_SYMBOL, tcti_lib);
-		tpm_tss_tss2_deinit();
-
+		dlclose(tcti_handle);
 		return FALSE;
     }
 	DBG2(DBG_PTS, "%s \"%s\" successfully loaded", LABEL, tcti_lib);
 	info = infofn();
 	tcti_init = info->init;
+	ref_get(&tcti_init_ref);
 
 	return TRUE;
 }
@@ -1520,31 +1504,49 @@ bool tpm_tss_tss2_init(void)
 /**
  * See header
  */
-void tpm_tss_tss2_deinit(void)
+tpm_tss_t *tpm_tss_tss2_create()
 {
-	dlclose(tcti_handle);
-	tcti_handle = NULL;
-	tcti_init   = NULL;
-	tcti_opts   = NULL;
-}
+	private_tpm_tss_tss2_t *this;
+	bool available;
 
-#else /* TSS_TSS2_V2 */
+	if (!init_tcti_library())
+	{
+		return NULL;
+	}
 
-/**
- * See header
- */
-bool tpm_tss_tss2_init(void)
-{
-	return TRUE;
-}
+	INIT(this,
+		.public = {
+			.get_version = _get_version,
+			.get_version_info = _get_version_info,
+			.generate_aik = _generate_aik,
+			.get_public = _get_public,
+			.supported_signature_schemes = _supported_signature_schemes,
+			.has_pcr_bank = _has_pcr_bank,
+			.read_pcr = _read_pcr,
+			.extend_pcr = _extend_pcr,
+			.quote = _quote,
+			.sign = _sign,
+			.get_random = _get_random,
+			.get_data = _get_data,
+			.get_event_digest = _get_event_digest,
+			.destroy = _destroy,
+		},
+		.mutex = mutex_create(MUTEX_TYPE_DEFAULT),
+	);
 
-/**
- * See header
- */
-void tpm_tss_tss2_deinit(void)
-{
-	/* empty */
+	available = initialize_tcti_context(this);
+	if (available)
+	{
+		available = initialize_sys_context(this);
+	}
+	DBG1(DBG_PTS, "TPM 2.0 via TSS2 v2 %savailable", available ? "" : "not ");
+
+	if (!available)
+	{
+		destroy(this);
+		return NULL;
+	}
+	return &this->public;
 }
 
 #endif /* TSS_TSS2_V2 */
-

@@ -81,7 +81,6 @@ METHOD(plugin_t, destroy, void,
 	private_tpm_plugin_t *this)
 {
 	free(this);
-	libtpmtss_deinit();
 }
 
 /*
@@ -90,11 +89,6 @@ METHOD(plugin_t, destroy, void,
 plugin_t *tpm_plugin_create()
 {
 	private_tpm_plugin_t *this;
-
-	if (!libtpmtss_init())
-	{
-		return NULL;
-	}
 
 	INIT(this,
 		.public = {

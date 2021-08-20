@@ -24,22 +24,6 @@
 #include "plugin_constructors.c"
 #endif
 
-/**
- * Described in header.
- */
-bool libtpmtss_init(void)
-{
-	return tpm_tss_tss2_init();
-}
-
-/**
- * Described in header.
- */
-void libtpmtss_deinit(void)
-{
-	tpm_tss_tss2_deinit();
-}
-
 typedef tpm_tss_t*(*tpm_tss_create)(void);
 
 /**
